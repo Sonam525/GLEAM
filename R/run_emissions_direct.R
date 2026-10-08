@@ -34,6 +34,13 @@
 #'
 #' @inheritParams run_gleam
 #'
+#' @param run_demographic Logical. If \code{TRUE} and
+#'   \code{has_herd_structure = FALSE}, include the demographic herd module in
+#'   the herd-structure generation step via \code{\link{run_all_herd_module}}.
+#' @param run_nondemographic Logical. If \code{TRUE} and
+#'   \code{has_herd_structure = FALSE}, include the non-demographic herd module
+#'   in the herd-structure generation step via \code{\link{run_all_herd_module}}.
+
 #' @param emission_factors_only Logical. If \code{TRUE}, stop after calculating
 #'   enteric and manure emission factors at cohort level, skipping production,
 #'   allocation, and aggregation. Factors are returned in
@@ -460,6 +467,8 @@
 #' @export
 run_emissions_direct <- function(
     has_herd_structure = FALSE,
+    run_demographic = TRUE,
+    run_nondemographic = TRUE,
     cohort_level_data,
     herd_level_data,
     feed_rations = NULL,
@@ -496,14 +505,56 @@ run_emissions_direct <- function(
     gleam_chrt_data <- data.table::as.data.table(cohort_level_data)
     gleam_hrd_data <- data.table::as.data.table(herd_level_data)
   } else {
-    herd_results <- run_demographic_herd_module(
+    herd_results <- run_all_herd_module(
       cohort_level_data = cohort_level_data,
       herd_level_data = herd_level_data,
       simulation_duration = simulation_duration,
-      show_indicator = show_indicator
+      show_indicator = show_indicator,
+      run_demographic = run_demographic,
+      run_nondemographic = run_nondemographic
     )
     gleam_chrt_data <- herd_results$cohort_level_results
     gleam_hrd_data <- herd_results$herd_level_results
+  }
+
+  # Optional nondemographic herd inputs are only needed for FN/MN cohorts, but
+  # downstream joins expect the columns to exist (mirrors run_gleam()).
+  optional_nondemo_hrd_cols <- c(
+    "prop_nondemo_fem_juv",
+    "prop_nondemo_mal_juv",
+    "rest_between_nondemo_cycles_duration",
+    "phase1_nondemo_fem_duration_days",
+    "phase2_nondemo_fem_duration_days",
+    "phase1_nondemo_mal_duration_days",
+    "phase2_nondemo_mal_duration_days",
+    "live_weight_female_nondemographic_start",
+    "live_weight_male_nondemographic_start",
+    "live_weight_female_nondemographic_end",
+    "live_weight_male_nondemographic_end"
+  )
+  missing_optional_nondemo_cols <- setdiff(optional_nondemo_hrd_cols, names(gleam_hrd_data))
+  if (length(missing_optional_nondemo_cols) > 0) {
+    gleam_hrd_data[, (missing_optional_nondemo_cols) := NA_real_]
+  }
+
+  if (!has_herd_structure && isTRUE(run_demographic) && isTRUE(run_nondemographic)) {
+    gleam_hrd_data[
+      !is.na(prop_nondemo_mal_juv) & prop_nondemo_mal_juv > 0,
+      live_weight_male_nondemographic_start := live_weight_at_weaning
+    ]
+    gleam_hrd_data[
+      is.na(prop_nondemo_mal_juv) | prop_nondemo_mal_juv <= 0,
+      live_weight_male_nondemographic_start := NA_real_
+    ]
+
+    gleam_hrd_data[
+      !is.na(prop_nondemo_fem_juv) & prop_nondemo_fem_juv > 0,
+      live_weight_female_nondemographic_start := live_weight_at_weaning
+    ]
+    gleam_hrd_data[
+      is.na(prop_nondemo_fem_juv) | prop_nondemo_fem_juv <= 0,
+      live_weight_female_nondemographic_start := NA_real_
+    ]
   }
 
   # --- Step 3: Run weights at cohort level ------------------------------------
@@ -526,7 +577,7 @@ run_emissions_direct <- function(
     gleam_chrt_data <- merge(
       gleam_chrt_data,
       feed_rations_summary,
-      by = c("herd_id", "species_short", "cohort_short")
+      by = c("herd_id", "species_short", "cohort_short", "nondemo_productive_phase_id")
     )
   }
 

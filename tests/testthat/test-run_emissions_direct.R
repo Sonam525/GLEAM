@@ -1,16 +1,22 @@
 # Independent fixtures for the direct emissions entry point.
 d_direct <- local({
-  path <- system.file("extdata/run_gleam_examples", package = "gleam")
+  path <- system.file("extdata/run_modules_examples", package = "gleam")
   read_input <- function(name) data.table::fread(file.path(path, name))
+  herd <- read_input("emissions_direct_input_hrd_data.csv")
+  # Shared example tables also cover herds outside the direct-emissions set.
+  in_herds <- function(dt) if ("herd_id" %in% names(dt)) dt[herd_id %in% herd$herd_id] else dt
   list(
-    cohort_no_structure = read_input("master_chrt_lvl_no_structure_data.csv"),
-    cohort_structure = read_input("master_chrt_lvl_structure_data.csv"),
-    herd = read_input("master_hrd_lvl_data.csv"),
-    feed_rations = read_input("feed_rations_share_chrt.csv"),
+    cohort_no_structure = read_input("emissions_direct_input_chrt_no_structure_data.csv"),
+    cohort_structure = read_input("emissions_direct_input_chrt_structure_data.csv"),
+    herd = herd,
+    # The direct-emissions examples only contain demographic cohorts.
+    feed_rations = in_herds(read_input("feed_rations_share_chrt.csv"))[
+      cohort_short %in% gleam_cohorts_demographic
+    ],
     feed_params = read_input("feed_quality.csv"),
-    feed_emissions = read_input("feed_emission_factors.csv"),
-    mms_fraction = read_input("manure_management_system_fraction.csv"),
-    mms_factors = read_input("manure_management_system_factors.csv")
+    feed_emissions = in_herds(read_input("feed_emission_factors.csv")),
+    mms_fraction = in_herds(read_input("manure_management_system_fraction.csv")),
+    mms_factors = in_herds(read_input("manure_management_system_factors.csv"))
   )
 })
 
@@ -19,7 +25,8 @@ direct_quality <- run_ration_quality_module(
 )
 data.table::setkeyv(direct_quality, c("herd_id", "species_short", "cohort_short"))
 direct_quality_cols <- setdiff(
-  names(direct_quality), c("herd_id", "species_short", "cohort_short")
+  names(direct_quality),
+  c("herd_id", "species_short", "cohort_short", "nondemo_productive_phase_id")
 )
 
 direct_inputs <- function(has_herd_structure = TRUE, primary = FALSE) {
